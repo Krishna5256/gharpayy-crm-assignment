@@ -30,10 +30,50 @@ export function health(st: MovementState): import("./types").Health {
     if (u < 60) return "due-soon";
     return "healthy";
   }
+
   if (st.handoffTo && !st.handoffAckAt && mins(st.handoffAt) > 20) return "at-risk";
   if (!st.nextAction && st.stage !== "new" && mins(st.updatedAt) > 24 * 60) return "stuck";
   if (st.stage === "new" && mins(st.updatedAt) > 120) return "at-risk";
   return "healthy";
+}
+
+export function healthReason(st: MovementState): string {
+  if (st.stage === "booked") return "Customer is booked";
+  if (st.stage === "lost") return "Customer journey has ended";
+
+  const waiting = mins(st.customerWaitingSince);
+
+  if (st.customerWaitingSince && waiting > 30) {
+    return `Customer waiting ${waiting}m`;
+  }
+
+  if (st.customerWaitingSince && waiting > 10) {
+    return `Customer waiting ${waiting}m`;
+  }
+
+  if (st.nextAction) {
+    const u = untilMins(st.nextAction.dueAt);
+
+    if (u < -30) return `Next action overdue ${Math.abs(u)}m`;
+    if (u < 0) return "Next action is due now";
+    if (u < 60) return `Next action due in ${u}m`;
+
+    return "Next action is on track";
+  }
+
+  if (st.handoffTo && !st.handoffAckAt && mins(st.handoffAt) > 20) {
+    return "Handoff has not been acknowledged";
+  }
+
+  if (!st.nextAction && st.stage !== "new" && mins(st.updatedAt) > 24 * 60) {
+    return "No next action for more than 24h";
+  }
+
+  if (st.stage === "new" && mins(st.updatedAt) > 120) {
+    return "Fresh lead has been inactive for over 2h";
+  }
+
+  return "Customer journey is on track";
 }
 
 export function scoreLead(st: MovementState): Scored {
@@ -68,26 +108,42 @@ export function scoreLead(st: MovementState): Scored {
   }
 
   const base: Record<PriorityBucket, number> = {
-    P0: 1000, P1: 900, P2: 800, P3: 700, P4: 600, P5: 500, P6: 100,
+    P0: 1000,
+    P1: 900,
+    P2: 800,
+    P3: 700,
+    P4: 600,
+    P5: 500,
+    P6: 100,
   };
+
   let score = base[bucket];
   score += Math.min(waiting, 120);
   score += Math.min(Math.max(overdue, 0), 180) / 2;
+
   if (st.crmDraft === "D1") score += 60;
   if (st.crmDraft === "D2") score += 30;
   if (st.crmDraft === "D4") score -= 40;
   if (st.goodLead) score += 25;
+
   if (st.checkInDate) {
     const days = (+new Date(st.checkInDate) - Date.now()) / 86400000;
     if (days <= 3) score += 50;
     else if (days <= 7) score += 25;
     else if (days > 30) score -= 20;
   }
+
   if (st.handoffTo && !st.handoffAckAt) score += 40;
 
   return {
-    ulid: st.ulid, state: st, bucket, score: Math.round(score), reason,
-    health: health(st), minutesWaiting: waiting, overdueMins: Math.max(0, overdue),
+    ulid: st.ulid,
+    state: st,
+    bucket,
+    score: Math.round(score),
+    reason,
+    health: health(st),
+    minutesWaiting: waiting,
+    overdueMins: Math.max(0, overdue),
   };
 }
 
@@ -107,30 +163,48 @@ export function active13(states: MovementState[], meId?: string): Scored[] {
 export function drafting30(states: MovementState[]): MovementState[] {
   return states
     .filter((s) => !s.crmDraft || s.waDraft !== s.crmDraft)
-    .sort((a, b) => +new Date(b.lastCustomerMsgAt ?? b.updatedAt) - +new Date(a.lastCustomerMsgAt ?? a.updatedAt))
+    .sort(
+      (a, b) =>
+        +new Date(b.lastCustomerMsgAt ?? b.updatedAt) -
+        +new Date(a.lastCustomerMsgAt ?? a.updatedAt)
+    )
     .slice(0, 30);
 }
 
 /** Good-lead gate — derived from progressive qualification, never a manual flag. */
-export function evaluateGoodLead(st: MovementState): { good: boolean; reasons: string[] } {
+export function evaluateGoodLead(
+  st: MovementState
+): { good: boolean; reasons: string[] } {
   const q = st.q ?? {};
   const reasons: string[] = [];
+
   if (q.moveInDate) reasons.push("Check-in date known");
   if (q.location) reasons.push("Location known");
   if (q.budget) reasons.push("Budget known");
   if (q.inBangalore) reasons.push("In Bangalore");
   if (q.responding !== false) reasons.push("Responding");
-  if (q.priceIntent === "ok" || q.priceIntent === "stretch") reasons.push("Price acceptable");
+  if (q.priceIntent === "ok" || q.priceIntent === "stretch") {
+    reasons.push("Price acceptable");
+  }
   if (q.inventoryFit) reasons.push("Inventory fits");
+
   const blockers: string[] = [];
+
   if (q.responding === false) blockers.push("Not responding");
   if (q.priceIntent === "no") blockers.push("Price rejected");
   if (q.feasible === false) blockers.push("Not feasible");
-  if (q.inBangalore === false && !q.moveInDate) blockers.push("Outside city, no date");
+  if (q.inBangalore === false && !q.moveInDate) {
+    blockers.push("Outside city, no date");
+  }
+
   const good =
     blockers.length === 0 &&
     Boolean(q.moveInDate) &&
     Boolean(q.location || q.officeOrCollege) &&
     Boolean(q.budget);
-  return { good, reasons: blockers.length ? blockers : reasons };
+
+  return {
+    good,
+    reasons: blockers.length ? blockers : reasons,
+  };
 }

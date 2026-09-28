@@ -48,6 +48,28 @@ export function ClosingDesk({ onOpenLead }: { onOpenLead: (id: string) => void }
   }, [leads, tab, hydrated]);
 
   const pot = rows.reduce((sum, { f }) => sum + Number(f["rent"] ?? 0), 0);
+    const closingPulse = useMemo(() => {
+    const late = rows.filter(({ h }) => h.sla === "LATE").length;
+    const tower = rows.filter(({ h }) => h.toTower).length;
+    const moneyPending = rows.filter(
+      ({ f }) =>
+        f["payment"] === "PENDING" ||
+        f["payment"] === "PARTIAL"
+    ).length;
+
+    const approvalPending = rows.filter(
+      ({ f }) =>
+        Boolean(f["bookingAmount"]) &&
+        f["approval"] !== "APPROVED"
+    ).length;
+
+    return {
+      late,
+      tower,
+      moneyPending,
+      approvalPending,
+    };
+  }, [rows]);
 
   function collect(id: string, f: Record<string, string>) {
     const amt = amount[id];
@@ -67,6 +89,39 @@ export function ClosingDesk({ onOpenLead }: { onOpenLead: (id: string) => void }
         ))}
         <Badge variant="outline" className="ml-auto text-[10px]"><IndianRupee className="mr-1 h-3 w-3" />{rows.length} customers · {money(String(pot || ""))} monthly rent on the table</Badge>
       </div>
+            <Card className="p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Closing Pulse
+            </div>
+            <div className="mt-1 text-sm font-semibold">
+              {rows.length} active closing cases
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              Focus first on late, blocked and money-pending customers.
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 text-[10px]">
+            <Badge variant={closingPulse.late > 0 ? "destructive" : "outline"}>
+              {closingPulse.late} late
+            </Badge>
+
+            <Badge variant={closingPulse.tower > 0 ? "destructive" : "outline"}>
+              {closingPulse.tower} tower risk
+            </Badge>
+
+            <Badge variant={closingPulse.approvalPending > 0 ? "secondary" : "outline"}>
+              {closingPulse.approvalPending} approval pending
+            </Badge>
+
+            <Badge variant={closingPulse.moneyPending > 0 ? "secondary" : "outline"}>
+              {closingPulse.moneyPending} money pending
+            </Badge>
+          </div>
+        </div>
+      </Card>
 
       {rows.map(({ l, h, f }) => (
         <Card key={l.id} className="p-3">

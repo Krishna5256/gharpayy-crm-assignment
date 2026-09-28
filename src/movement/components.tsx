@@ -9,7 +9,14 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useMovement } from "./store";
-import { active13, drafting30, rank, type Scored } from "./priority";
+import {
+  active13,
+  drafting30,
+  health,
+  healthReason,
+  rank,
+  type Scored,
+} from "./priority";
 import { funnel, leaks, lossReasons, operatorBoard, totals } from "./metrics";
 import { DRAFT_META, PRIORITY_LABEL, type DraftCode, type MovementState } from "./types";
 
@@ -292,6 +299,69 @@ export function WorkPanel({ ulid, meta }: { ulid: string | null; meta: Meta }) {
   }
   const info = meta.get(ulid);
   const held = !!lock;
+    const nextBestAction = (() => {
+    if (st.stage === "booked" || st.stage === "check-in" || st.stage === "lost") {
+      return null;
+    }
+
+    if (st.paymentExpected || st.prebook.paymentIntent) {
+      return {
+        kind: "Collect payment",
+        reason: "Customer has shown payment intent",
+        action: "payment",
+      };
+    }
+
+    if (st.stage === "quotation" || st.stage === "negotiation") {
+      return {
+        kind: "Follow up on quotation",
+        reason: "Lead is in the closing stage",
+        action: "quote",
+      };
+    }
+
+    if (st.tourDoneAt && !st.tourOutcome) {
+      return {
+        kind: "Capture tour outcome",
+        reason: "Tour is completed but outcome is pending",
+        action: "tour",
+      };
+    }
+
+    if (st.tourAt && !st.tourConfirmed) {
+      return {
+        kind: "Confirm tour",
+        reason: "Scheduled tour is not confirmed",
+        action: "tour",
+      };
+    }
+
+    if (st.customerWaitingSince || st.unread > 0) {
+      return {
+        kind: "Respond to customer",
+        reason: "Customer is waiting for a response",
+        action: "respond",
+      };
+    }
+
+    if (st.goodLead) {
+      return {
+        kind: "Call high-intent lead",
+        reason: "Lead is marked as definitely close",
+        action: "call",
+      };
+    }
+
+    if (!st.nextAction) {
+      return {
+        kind: "Set a follow-up",
+        reason: "No next action is currently scheduled",
+        action: "followup",
+      };
+    }
+
+    return null;
+  })();
 
   const nextIn = (mins: number, kind: Parameters<typeof mv.setNextAction>[1]["kind"]) => {
     mv.setNextAction(ulid, {
@@ -331,7 +401,147 @@ export function WorkPanel({ ulid, meta }: { ulid: string | null; meta: Meta }) {
         <Cell label="Waiting">{st.customerWaitingSince ? `${rel(st.customerWaitingSince)} ago` : "—"}</Cell>
         <Cell label="Tour">{st.tourAt ? `${new Date(st.tourAt).toLocaleString()}${st.tourConfirmed ? " ✓" : " (unconfirmed)"}` : "—"}</Cell>
       </div>
+      <div className="rounded-lg border border-border bg-card p-3">
+  <div className="flex items-center justify-between gap-3">
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+        Lead Health
+      </div>
 
+      <div className="flex items-center gap-2 mt-1">
+        <span
+          className={cn(
+            "px-2 py-1 rounded-md text-[11px] font-semibold uppercase",
+            HEALTH_CLS[health(st)]
+          )}
+        >
+          {health(st)}
+        </span>
+
+        <span className="text-xs text-muted-foreground">
+          {healthReason(st)}
+        </span>
+      </div>
+    </div>
+
+    <div className="text-right">
+      <div className="text-[10px] text-muted-foreground">
+        Priority
+      </div>
+
+      <div className="text-sm font-semibold">
+        {st.goodLead ? "High intent" : "Standard"}
+      </div>
+    </div>
+  </div>
+</div>
+            {nextBestAction && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-primary font-semibold">
+                Next Best Action
+              </div>
+              <div className="text-sm font-semibold mt-1">
+                {nextBestAction.kind}
+              </div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                {nextBestAction.reason}
+              </div>
+            </div>
+
+            <Badge variant="outline" className="text-[10px] shrink-0">
+              Recommended
+            </Badge>
+          </div>
+
+          <div className="mt-2">
+            {nextBestAction.action === "call" && (
+              <Button
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => {
+                  mv.startCall(ulid);
+                  toast.success("Call started");
+                }}
+              >
+                <Phone className="h-3 w-3 mr-1" />
+                Start call
+              </Button>
+            )}
+
+            {nextBestAction.action === "respond" && (
+              <Button
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => {
+                  mv.attemptClaim(ulid, "work", "respond to waiting customer");
+                  toast.success("Customer work claimed");
+                }}
+              >
+                <MessageSquare className="h-3 w-3 mr-1" />
+                Respond
+              </Button>
+            )}
+
+            {nextBestAction.action === "tour" && (
+              <Button
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => {
+                  if (st.tourAt && !st.tourConfirmed) {
+                    mv.confirmTour(ulid);
+                    toast.success("Tour confirmed");
+                  } else {
+                    mv.tourOutcome(ulid, "positive");
+                    toast.success("Tour outcome captured");
+                  }
+                }}
+              >
+                <CheckCircle2 className="h-3 w-3 mr-1" />
+                Take action
+              </Button>
+            )}
+
+            {nextBestAction.action === "quote" && (
+              <Button
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => {
+                  mv.sendQuote(ulid);
+                  toast.success("Quotation sent");
+                }}
+              >
+                Send quotation
+              </Button>
+            )}
+
+            {nextBestAction.action === "payment" && (
+              <Button
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => {
+                  mv.collectPayment(ulid);
+                  toast.success("Payment recorded");
+                }}
+              >
+                Collect payment
+              </Button>
+            )}
+
+            {nextBestAction.action === "followup" && (
+              <Button
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => nextIn(1440, "recheck-later")}
+              >
+                <Clock className="h-3 w-3 mr-1" />
+                Schedule tomorrow
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
       <div className="space-y-2">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Call</div>
         <div className="flex flex-wrap gap-1.5">

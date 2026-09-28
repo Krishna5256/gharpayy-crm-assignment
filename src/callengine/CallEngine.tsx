@@ -65,6 +65,34 @@ export function CallEngine({ lead, onLogged }: Props) {
   const nextPlan = useMemo(() => noAnswerPlan(lead, attempt + 1), [lead, attempt]);
   const mission = useMemo(() => callMission(lead, agenda, cap), [lead, agenda, cap]);
   const media = useMemo(() => rankedForCustomer(lead, []).slice(0, 3), [lead]);
+      const readiness = useMemo(() => {
+    const fields = [
+      "Move-in",
+      "Area",
+      "Office / College",
+      "Budget",
+      "Room",
+      "In Bangalore",
+      "For whom",
+    ];
+
+    const verified = cap.verified ?? [];
+    const completed = fields.filter((field) => verified.includes(field));
+    const missing = fields.filter((field) => !verified.includes(field));
+
+    const score = Math.round((completed.length / fields.length) * 100);
+
+    return {
+      score,
+      missing,
+      label:
+        score >= 80
+          ? "Ready for property recommendation"
+          : score >= 50
+            ? "Requirements partially captured"
+            : "More qualification needed",
+    };
+  }, [cap.verified]);
 
   const set = (p: Partial<CallCapture>) => setCap((c) => ({ ...c, ...p }));
   const toggle = (key: "activities" | "promises" | "matters", value: string) =>
@@ -281,6 +309,40 @@ export function CallEngine({ lead, onLogged }: Props) {
       {phase === "capture" && (
         <>
           <Separator />
+          <div className="rounded-md border border-border bg-card p-3">
+  <div className="flex items-center justify-between gap-3">
+    <div>
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Call Readiness
+      </div>
+
+      <div className="mt-1 text-sm font-semibold">
+        {readiness.score}% — {readiness.label}
+      </div>
+
+      {readiness.missing.length > 0 && (
+        <div className="mt-1 text-[10px] text-muted-foreground">
+          Missing: {readiness.missing.join(", ")}
+        </div>
+      )}
+    </div>
+
+    <Badge variant="outline">
+      {readiness.score >= 80
+        ? "Ready"
+        : readiness.score >= 50
+          ? "Partial"
+          : "Needs info"}
+    </Badge>
+  </div>
+
+  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+    <div
+      className="h-full rounded-full bg-primary transition-all"
+      style={{ width: `${readiness.score}%` }}
+    />
+  </div>
+</div>
           <div className="flex flex-wrap gap-1.5">
             {OUTCOMES.map((o) => (
               <Chip key={o.key} on={outcome === o.key} onClick={() => setOutcome(o.key)}>{o.label}</Chip>
